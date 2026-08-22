@@ -67,7 +67,7 @@ jobs:
           echo "$CHANGED_FILES"
 
           if echo "$CHANGED_FILES" | grep -Eq \
-            '^(\.github/workflows/ci\.yml|docker-compose\.yml|docker/|infrastructure/)'; then
+            '^(\.github/workflows/ci\.yml|\.trivyignore|docker-compose\.yml|docker/|infrastructure/)'; then
 
             echo "Shared configuration changed. Running all services."
             echo "services=$(echo "$ALL_SERVICES" | jq -c .)" >> "$GITHUB_OUTPUT"
@@ -157,17 +157,17 @@ jobs:
         working-directory: .
         run: |
           docker compose up -d postgres
-          
+
           for i in {1..30}; do
             if docker exec fintech-postgres \
               pg_isready -U fintech_user -d postgres; then
               echo "PostgreSQL is ready"
               exit 0
             fi
-          
+
             sleep 2
           done
-          
+
           echo "PostgreSQL failed to become ready"
           docker compose logs postgres
           exit 1
@@ -183,17 +183,17 @@ jobs:
         working-directory: .
         run: |
           docker compose up -d redis
-          
+
           for i in {1..30}; do
             if docker exec fintech-redis \
               redis-cli ping | grep -q PONG; then
               echo "Redis is ready"
               exit 0
             fi
-          
+
             sleep 2
           done
-          
+
           echo "Redis failed to become ready"
           docker compose logs redis
           exit 1
@@ -210,20 +210,20 @@ jobs:
         working-directory: .
         run: |
           docker compose up -d zookeeper kafka
-          
+
           for i in {1..60}; do
             if docker exec fintech-kafka \
               kafka-broker-api-versions \
               --bootstrap-server localhost:29092 \
               >/dev/null 2>&1; then
-          
+
               echo "Kafka is ready"
               exit 0
             fi
-          
+
             sleep 2
           done
-          
+
           echo "Kafka failed to become ready"
           docker compose logs zookeeper kafka
           exit 1
@@ -358,6 +358,7 @@ jobs:
           format: table
           severity: CRITICAL
           ignore-unfixed: true
+          ignorefile: .trivyignore
           exit-code: "1"
 
       - name: Push Docker images

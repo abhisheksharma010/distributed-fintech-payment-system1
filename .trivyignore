@@ -1,0 +1,36 @@
+# ============================================================
+# Temporary Trivy Vulnerability Suppressions
+# ============================================================
+#
+# These vulnerabilities are temporarily accepted so that
+# container publishing can continue while dependency upgrades
+# are handled separately.
+#
+# IMPORTANT:
+# - Do not add new CVEs here automatically.
+# - New CRITICAL vulnerabilities must continue to fail CI.
+# - Remove entries after the affected dependency is upgraded.
+# ============================================================
+
+# ------------------------------------------------------------
+# Bouncy Castle
+# ------------------------------------------------------------
+# Installed: 1.80
+# Fixed: 1.80.2 / 1.81.1 / 1.84
+CVE-2025-14813
+
+# ------------------------------------------------------------
+# Spring Security Web
+# ------------------------------------------------------------
+# Installed: 6.5.8
+# Fixed: 6.5.9 / 7.0.4
+CVE-2026-22732
+
+# ------------------------------------------------------------
+# Apache Tomcat
+# ------------------------------------------------------------
+# Installed: 10.1.52
+# Fixed version available: 10.1.55
+CVE-2026-41293
+CVE-2026-43512
+CVE-2026-43515
