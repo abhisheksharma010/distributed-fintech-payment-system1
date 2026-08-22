@@ -1,6 +1,6 @@
-name: Fintech CI/CD
+name: Fintech Pipeline
 
-run-name: "Fintech Pipeline · ${{ github.ref_name }} · ${{ github.event_name }}"
+run-name: "${{ github.ref_name }} · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   push:
@@ -19,29 +19,32 @@ permissions:
   packages: write
 
 concurrency:
-  group: fintech-${{ github.workflow }}-${{ github.ref }}
+  group: fintech-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/distributed-fintech
 
-
 jobs:
 
   # =========================================================
-  # 1. Detect what changed
+  # Detect affected services
   # =========================================================
 
-  change-scope:
-    name: 🔎 Change Scope
+  changes:
+    name: Detect Changes
     runs-on: ubuntu-latest
 
     outputs:
-      services: ${{ steps.detect.outputs.services }}
+      api_gateway: ${{ steps.detect.outputs.api_gateway }}
+      identity: ${{ steps.detect.outputs.identity }}
+      payment: ${{ steps.detect.outputs.payment }}
+      ledger: ${{ steps.detect.outputs.ledger }}
+      notification: ${{ steps.detect.outputs.notification }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -52,13 +55,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          ALL_SERVICES='[
-            "api-gateway",
-            "identity-service",
-            "payment-service",
-            "ledger-service",
-            "notification-service"
-          ]'
+          API_GATEWAY=false
+          IDENTITY=false
+          PAYMENT=false
+          LEDGER=false
+          NOTIFICATION=false
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE="${{ github.event.pull_request.base.sha }}"
@@ -69,119 +70,85 @@ jobs:
           HEAD="${{ github.sha }}"
 
           if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]]; then
-            echo "No valid base SHA."
-            echo "Running validation for all services."
+            echo "No valid base commit. Running all services."
 
-            echo "services=$(echo "$ALL_SERVICES" | jq -c .)" \
-              >> "$GITHUB_OUTPUT"
-
-            exit 0
-          fi
-
-          echo "Base SHA: $BASE"
-          echo "Head SHA: $HEAD"
-
-          CHANGED_FILES="$(git diff --name-only "$BASE" "$HEAD")"
-
-          echo ""
-          echo "Changed files:"
-          echo "$CHANGED_FILES"
-
-          # -------------------------------------------------
-          # Shared changes
-          # -------------------------------------------------
-          #
-          # These can affect multiple/all services, so validate
-          # the complete application.
-          # -------------------------------------------------
-
-          if echo "$CHANGED_FILES" | grep -Eq \
-            '^(\.github/workflows/ci\.yml|\.trivyignore|docker-compose\.yml|docker/|infrastructure/)'; then
-
-            echo ""
-            echo "Shared configuration changed."
-            echo "Running all services."
-
-            echo "services=$(echo "$ALL_SERVICES" | jq -c .)" \
-              >> "$GITHUB_OUTPUT"
-
-            exit 0
-          fi
-
-          SERVICES=()
-
-          # -------------------------------------------------
-          # Service-specific changes
-          # -------------------------------------------------
-
-          if echo "$CHANGED_FILES" | grep -q '^api-gateway/'; then
-            SERVICES+=("api-gateway")
-          fi
-
-          if echo "$CHANGED_FILES" | grep -q '^identity-service/'; then
-            SERVICES+=("identity-service")
-          fi
-
-          if echo "$CHANGED_FILES" | grep -q '^payment-service/'; then
-            SERVICES+=("payment-service")
-          fi
-
-          if echo "$CHANGED_FILES" | grep -q '^ledger-service/'; then
-            SERVICES+=("ledger-service")
-          fi
-
-          if echo "$CHANGED_FILES" | grep -q '^notification-service/'; then
-            SERVICES+=("notification-service")
-          fi
-
-          # -------------------------------------------------
-          # Generate JSON matrix
-          # -------------------------------------------------
-
-          if [[ ${#SERVICES[@]} -eq 0 ]]; then
-            JSON='[]'
+            API_GATEWAY=true
+            IDENTITY=true
+            PAYMENT=true
+            LEDGER=true
+            NOTIFICATION=true
           else
-            JSON="$(printf '%s\n' "${SERVICES[@]}" \
-              | jq -R . \
-              | jq -s -c .)"
+            CHANGED_FILES="$(git diff --name-only "$BASE" "$HEAD")"
+
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+
+            # Shared files can affect the complete application.
+            if echo "$CHANGED_FILES" | grep -Eq \
+              '^(\.github/workflows/ci\.yml|\.trivyignore|docker-compose\.yml|docker/|infrastructure/)'; then
+
+              echo "Shared configuration changed."
+
+              API_GATEWAY=true
+              IDENTITY=true
+              PAYMENT=true
+              LEDGER=true
+              NOTIFICATION=true
+            else
+
+              if echo "$CHANGED_FILES" | grep -q '^api-gateway/'; then
+                API_GATEWAY=true
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q '^identity-service/'; then
+                IDENTITY=true
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q '^payment-service/'; then
+                PAYMENT=true
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q '^ledger-service/'; then
+                LEDGER=true
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q '^notification-service/'; then
+                NOTIFICATION=true
+              fi
+            fi
           fi
 
+          echo "api_gateway=$API_GATEWAY" >> "$GITHUB_OUTPUT"
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "payment=$PAYMENT" >> "$GITHUB_OUTPUT"
+          echo "ledger=$LEDGER" >> "$GITHUB_OUTPUT"
+          echo "notification=$NOTIFICATION" >> "$GITHUB_OUTPUT"
+
           echo ""
-          echo "Affected services: $JSON"
-
-          echo "services=$JSON" >> "$GITHUB_OUTPUT"
+          echo "API Gateway:   $API_GATEWAY"
+          echo "Identity:      $IDENTITY"
+          echo "Payment:       $PAYMENT"
+          echo "Ledger:        $LEDGER"
+          echo "Notification:  $NOTIFICATION"
 
 
   # =========================================================
-  # 2. Test + build affected services
+  # API Gateway
   # =========================================================
 
-  verify:
-    name: 🧪 Verify · ${{ matrix.service }}
+  api-gateway:
+    name: API Gateway
+    needs: changes
 
-    needs:
-      - change-scope
-
-    if: ${{ needs.change-scope.outputs.services != '[]' }}
+    if: needs.changes.outputs.api_gateway == 'true'
 
     runs-on: ubuntu-latest
 
-    strategy:
-      fail-fast: false
-
-      matrix:
-        service: ${{ fromJSON(needs.change-scope.outputs.services) }}
-
     defaults:
       run:
-        working-directory: ${{ matrix.service }}
+        working-directory: api-gateway
 
     steps:
-
-      # -----------------------------------------------------
-      # Source + Java
-      # -----------------------------------------------------
-
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -197,362 +164,622 @@ jobs:
       - name: Enable Gradle wrapper
         run: chmod +x gradlew
 
-      - name: Verify Java runtime
-        run: java -version
-
-
-      # -----------------------------------------------------
-      # PostgreSQL
-      # -----------------------------------------------------
-
-      - name: 🐘 Start PostgreSQL
-        if: |
-          matrix.service == 'identity-service' ||
-          matrix.service == 'payment-service' ||
-          matrix.service == 'ledger-service' ||
-          matrix.service == 'notification-service'
-        working-directory: .
-        run: |
-          docker compose up -d postgres
-
-          for i in {1..30}; do
-
-            if docker exec fintech-postgres \
-              pg_isready -U fintech_user -d postgres; then
-
-              echo "PostgreSQL is ready"
-              exit 0
-            fi
-
-            sleep 2
-          done
-
-          echo "PostgreSQL failed to become ready"
-
-          docker compose logs postgres
-
-          exit 1
-
-
-      # -----------------------------------------------------
-      # Redis
-      # -----------------------------------------------------
-
-      - name: 🔴 Start Redis
-        if: |
-          matrix.service == 'api-gateway' ||
-          matrix.service == 'ledger-service'
+      - name: Start Redis
         working-directory: .
         run: |
           docker compose up -d redis
 
           for i in {1..30}; do
-
-            if docker exec fintech-redis \
-              redis-cli ping | grep -q PONG; then
-
-              echo "Redis is ready"
+            if docker exec fintech-redis redis-cli ping | grep -q PONG; then
+              echo "Redis ready"
               exit 0
             fi
 
             sleep 2
           done
 
-          echo "Redis failed to become ready"
-
-          docker compose logs redis
-
           exit 1
 
-
-      # -----------------------------------------------------
-      # Kafka
-      # -----------------------------------------------------
-
-      - name: 📨 Start Kafka
-        if: |
-          matrix.service == 'payment-service' ||
-          matrix.service == 'ledger-service' ||
-          matrix.service == 'notification-service'
-        working-directory: .
-        run: |
-          docker compose up -d zookeeper kafka
-
-          for i in {1..60}; do
-
-            if docker exec fintech-kafka \
-              kafka-broker-api-versions \
-              --bootstrap-server localhost:29092 \
-              >/dev/null 2>&1; then
-
-              echo "Kafka is ready"
-              exit 0
-            fi
-
-            sleep 2
-          done
-
-          echo "Kafka failed to become ready"
-
-          docker compose logs zookeeper kafka
-
-          exit 1
-
-
-      # -----------------------------------------------------
-      # Tests + application build
-      # -----------------------------------------------------
-
-      - name: 🧪 Test & Build
+      - name: Test and Build
         run: ./gradlew clean build --no-daemon
 
-
-      # -----------------------------------------------------
-      # Test reporting
-      # -----------------------------------------------------
-
-      - name: 📊 Publish Test Results
+      - name: Publish Test Results
         if: always()
         uses: dorny/test-reporter@v2
         with:
-          name: Tests · ${{ matrix.service }}
-          path: ${{ matrix.service }}/build/test-results/test/**/*.xml
+          name: API Gateway Tests
+          path: api-gateway/build/test-results/test/**/*.xml
           reporter: java-junit
           fail-on-error: false
           working-directory: .
 
+      # Docker publishing happens only for main pushes.
 
-      # -----------------------------------------------------
-      # Failure artifacts
-      # -----------------------------------------------------
-
-      - name: Upload failure reports
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-report-${{ matrix.service }}
-
-          path: |
-            ${{ matrix.service }}/build/reports/tests/test
-            ${{ matrix.service }}/build/test-results/test
-
-          if-no-files-found: ignore
-          retention-days: 7
-
-
-      # -----------------------------------------------------
-      # Diagnostics
-      # -----------------------------------------------------
-
-      - name: Show infrastructure diagnostics
-        if: failure()
-        working-directory: .
-        run: |
-          echo "===== Docker services ====="
-
-          docker compose ps || true
-
-          echo ""
-          echo "===== PostgreSQL ====="
-
-          docker compose logs postgres --tail=100 || true
-
-          echo ""
-          echo "===== Redis ====="
-
-          docker compose logs redis --tail=100 || true
-
-          echo ""
-          echo "===== Kafka ====="
-
-          docker compose logs kafka --tail=100 || true
-
-          echo ""
-          echo "===== ZooKeeper ====="
-
-          docker compose logs zookeeper --tail=100 || true
-
-
-      # -----------------------------------------------------
-      # Cleanup
-      # -----------------------------------------------------
-
-      - name: 🧹 Cleanup test infrastructure
-        if: always()
-        working-directory: .
-        run: |
-          docker compose down || true
-
-
-  # =========================================================
-  # 3. Build + scan + publish containers
-  # =========================================================
-
-  containers:
-    name: 📦 Container · ${{ matrix.service }}
-
-    needs:
-      - change-scope
-      - verify
-
-    if: |
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      needs.verify.result == 'success' &&
-      needs.change-scope.outputs.services != '[]'
-
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-
-      matrix:
-        service: ${{ fromJSON(needs.change-scope.outputs.services) }}
-
-    steps:
-
-      # -----------------------------------------------------
-      # Setup
-      # -----------------------------------------------------
-
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: 🐳 Setup Docker Buildx
+      - name: Setup Docker Buildx
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/setup-buildx-action@v3
 
-
-      # -----------------------------------------------------
-      # Registry authentication
-      # -----------------------------------------------------
-
-      - name: 🔐 Login to GHCR
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
-      # -----------------------------------------------------
-      # Image metadata
-      # -----------------------------------------------------
-
-      - name: 🏷️ Generate Image Metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
-
-          tags: |
-            type=sha,format=short,prefix=
-            type=raw,value=main
-
-
-      - name: Generate commit tag
+      - name: Get Image Tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: sha
         shell: bash
         run: |
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
-
-      # -----------------------------------------------------
-      # Docker build
-      # -----------------------------------------------------
-
-      - name: 🏗️ Build Container
+      - name: Build Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
-          context: ./${{ matrix.service }}
-          file: ./${{ matrix.service }}/Dockerfile
-
+          context: ./api-gateway
+          file: ./api-gateway/Dockerfile
           platforms: linux/amd64
-
-          push: false
           load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-api-gateway:${{ steps.sha.outputs.short_sha }}
+            ${{ env.IMAGE_PREFIX }}-api-gateway:main
+          cache-from: type=gha,scope=api-gateway
+          cache-to: type=gha,mode=max,scope=api-gateway
 
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-
-
-      # -----------------------------------------------------
-      # Security scan
-      # -----------------------------------------------------
-
-      - name: 🛡️ Trivy Security Scan
+      - name: Trivy Security Scan
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ steps.sha.outputs.short_sha }}
-
+          image-ref: ${{ env.IMAGE_PREFIX }}-api-gateway:${{ steps.sha.outputs.short_sha }}
           format: table
-
           severity: CRITICAL
-
           ignore-unfixed: true
           ignorefile: .trivyignore
-
           exit-code: "1"
 
-
-      # -----------------------------------------------------
-      # Publish
-      # -----------------------------------------------------
-
-      - name: 📤 Publish to GHCR
-        shell: bash
+      - name: Push Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          set -euo pipefail
+          docker push "${{ env.IMAGE_PREFIX }}-api-gateway:${{ steps.sha.outputs.short_sha }}"
+          docker push "${{ env.IMAGE_PREFIX }}-api-gateway:main"
 
-          echo "${{ steps.meta.outputs.tags }}" |
-          while read -r IMAGE; do
-
-            if [[ -n "$IMAGE" ]]; then
-              echo "Publishing $IMAGE"
-              docker push "$IMAGE"
-            fi
-
-          done
+      - name: Cleanup
+        if: always()
+        working-directory: .
+        run: docker compose down || true
 
 
   # =========================================================
-  # 4. Final pipeline summary
+  # Identity Service
   # =========================================================
 
-  summary:
-    name: ✅ Pipeline Summary
+  identity:
+    name: Identity Service
+    needs: changes
 
-    needs:
-      - change-scope
-      - verify
-      - containers
-
-    if: always()
+    if: needs.changes.outputs.identity == 'true'
 
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: identity-service
+
     steps:
-      - name: Write workflow summary
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Enable Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Start PostgreSQL
+        working-directory: .
+        run: |
+          docker compose up -d postgres
+
+          for i in {1..30}; do
+            if docker exec fintech-postgres \
+              pg_isready -U fintech_user -d postgres; then
+
+              echo "PostgreSQL ready"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          exit 1
+
+      - name: Test and Build
+        run: ./gradlew clean build --no-daemon
+
+      - name: Publish Test Results
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: Identity Tests
+          path: identity-service/build/test-results/test/**/*.xml
+          reporter: java-junit
+          fail-on-error: false
+          working-directory: .
+
+      - name: Setup Docker Buildx
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Image Tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: sha
         shell: bash
         run: |
-          {
-            echo "# 🚀 Distributed Fintech Pipeline"
-            echo ""
-            echo "## Results"
-            echo ""
-            echo "| Stage | Result |"
-            echo "|---|---|"
-            echo "| Change detection | ${{ needs.change-scope.result }} |"
-            echo "| Test & Build | ${{ needs.verify.result }} |"
-            echo "| Container Build / Scan / Publish | ${{ needs.containers.result }} |"
-            echo ""
-            echo "### Commit"
-            echo ""
-            echo "\`${{ github.sha }}\`"
-            echo ""
-            echo "### Branch"
-            echo ""
-            echo "\`${{ github.ref_name }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./identity-service
+          file: ./identity-service/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-identity-service:${{ steps.sha.outputs.short_sha }}
+            ${{ env.IMAGE_PREFIX }}-identity-service:main
+          cache-from: type=gha,scope=identity-service
+          cache-to: type=gha,mode=max,scope=identity-service
+
+      - name: Trivy Security Scan
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}-identity-service:${{ steps.sha.outputs.short_sha }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          ignorefile: .trivyignore
+          exit-code: "1"
+
+      - name: Push Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push "${{ env.IMAGE_PREFIX }}-identity-service:${{ steps.sha.outputs.short_sha }}"
+          docker push "${{ env.IMAGE_PREFIX }}-identity-service:main"
+
+      - name: Cleanup
+        if: always()
+        working-directory: .
+        run: docker compose down || true
+
+
+  # =========================================================
+  # Payment Service
+  # =========================================================
+
+  payment:
+    name: Payment Service
+    needs: changes
+
+    if: needs.changes.outputs.payment == 'true'
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: payment-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Enable Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Start PostgreSQL and Kafka
+        working-directory: .
+        run: |
+          docker compose up -d postgres zookeeper kafka
+
+          for i in {1..60}; do
+
+            POSTGRES_READY=false
+            KAFKA_READY=false
+
+            if docker exec fintech-postgres \
+              pg_isready -U fintech_user -d postgres >/dev/null 2>&1; then
+              POSTGRES_READY=true
+            fi
+
+            if docker exec fintech-kafka \
+              kafka-broker-api-versions \
+              --bootstrap-server localhost:29092 \
+              >/dev/null 2>&1; then
+              KAFKA_READY=true
+            fi
+
+            if [[ "$POSTGRES_READY" == "true" && "$KAFKA_READY" == "true" ]]; then
+              echo "PostgreSQL and Kafka ready"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          exit 1
+
+      - name: Test and Build
+        run: ./gradlew clean build --no-daemon
+
+      - name: Publish Test Results
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: Payment Tests
+          path: payment-service/build/test-results/test/**/*.xml
+          reporter: java-junit
+          fail-on-error: false
+          working-directory: .
+
+      - name: Setup Docker Buildx
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Image Tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: sha
+        shell: bash
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./payment-service
+          file: ./payment-service/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-payment-service:${{ steps.sha.outputs.short_sha }}
+            ${{ env.IMAGE_PREFIX }}-payment-service:main
+          cache-from: type=gha,scope=payment-service
+          cache-to: type=gha,mode=max,scope=payment-service
+
+      - name: Trivy Security Scan
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}-payment-service:${{ steps.sha.outputs.short_sha }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          ignorefile: .trivyignore
+          exit-code: "1"
+
+      - name: Push Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push "${{ env.IMAGE_PREFIX }}-payment-service:${{ steps.sha.outputs.short_sha }}"
+          docker push "${{ env.IMAGE_PREFIX }}-payment-service:main"
+
+      - name: Cleanup
+        if: always()
+        working-directory: .
+        run: docker compose down || true
+
+
+  # =========================================================
+  # Ledger Service
+  # =========================================================
+
+  ledger:
+    name: Ledger Service
+    needs: changes
+
+    if: needs.changes.outputs.ledger == 'true'
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ledger-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Enable Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Start PostgreSQL, Kafka and Redis
+        working-directory: .
+        run: |
+          docker compose up -d postgres redis zookeeper kafka
+
+          for i in {1..60}; do
+
+            POSTGRES_READY=false
+            REDIS_READY=false
+            KAFKA_READY=false
+
+            if docker exec fintech-postgres \
+              pg_isready -U fintech_user -d postgres >/dev/null 2>&1; then
+              POSTGRES_READY=true
+            fi
+
+            if docker exec fintech-redis \
+              redis-cli ping | grep -q PONG; then
+              REDIS_READY=true
+            fi
+
+            if docker exec fintech-kafka \
+              kafka-broker-api-versions \
+              --bootstrap-server localhost:29092 \
+              >/dev/null 2>&1; then
+              KAFKA_READY=true
+            fi
+
+            if [[ "$POSTGRES_READY" == "true" &&
+                  "$REDIS_READY" == "true" &&
+                  "$KAFKA_READY" == "true" ]]; then
+
+              echo "Ledger infrastructure ready"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          exit 1
+
+      - name: Test and Build
+        run: ./gradlew clean build --no-daemon
+
+      - name: Publish Test Results
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: Ledger Tests
+          path: ledger-service/build/test-results/test/**/*.xml
+          reporter: java-junit
+          fail-on-error: false
+          working-directory: .
+
+      - name: Setup Docker Buildx
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Image Tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: sha
+        shell: bash
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ledger-service
+          file: ./ledger-service/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-ledger-service:${{ steps.sha.outputs.short_sha }}
+            ${{ env.IMAGE_PREFIX }}-ledger-service:main
+          cache-from: type=gha,scope=ledger-service
+          cache-to: type=gha,mode=max,scope=ledger-service
+
+      - name: Trivy Security Scan
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}-ledger-service:${{ steps.sha.outputs.short_sha }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          ignorefile: .trivyignore
+          exit-code: "1"
+
+      - name: Push Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push "${{ env.IMAGE_PREFIX }}-ledger-service:${{ steps.sha.outputs.short_sha }}"
+          docker push "${{ env.IMAGE_PREFIX }}-ledger-service:main"
+
+      - name: Cleanup
+        if: always()
+        working-directory: .
+        run: docker compose down || true
+
+
+  # =========================================================
+  # Notification Service
+  # =========================================================
+
+  notification:
+    name: Notification Service
+    needs: changes
+
+    if: needs.changes.outputs.notification == 'true'
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: notification-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Enable Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Start PostgreSQL and Kafka
+        working-directory: .
+        run: |
+          docker compose up -d postgres zookeeper kafka
+
+          for i in {1..60}; do
+
+            POSTGRES_READY=false
+            KAFKA_READY=false
+
+            if docker exec fintech-postgres \
+              pg_isready -U fintech_user -d postgres >/dev/null 2>&1; then
+              POSTGRES_READY=true
+            fi
+
+            if docker exec fintech-kafka \
+              kafka-broker-api-versions \
+              --bootstrap-server localhost:29092 \
+              >/dev/null 2>&1; then
+              KAFKA_READY=true
+            fi
+
+            if [[ "$POSTGRES_READY" == "true" &&
+                  "$KAFKA_READY" == "true" ]]; then
+
+              echo "Notification infrastructure ready"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          exit 1
+
+      - name: Test and Build
+        run: ./gradlew clean build --no-daemon
+
+      - name: Publish Test Results
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: Notification Tests
+          path: notification-service/build/test-results/test/**/*.xml
+          reporter: java-junit
+          fail-on-error: false
+          working-directory: .
+
+      - name: Setup Docker Buildx
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Image Tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: sha
+        shell: bash
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./notification-service
+          file: ./notification-service/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-notification-service:${{ steps.sha.outputs.short_sha }}
+            ${{ env.IMAGE_PREFIX }}-notification-service:main
+          cache-from: type=gha,scope=notification-service
+          cache-to: type=gha,mode=max,scope=notification-service
+
+      - name: Trivy Security Scan
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}-notification-service:${{ steps.sha.outputs.short_sha }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          ignorefile: .trivyignore
+          exit-code: "1"
+
+      - name: Push Container
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push "${{ env.IMAGE_PREFIX }}-notification-service:${{ steps.sha.outputs.short_sha }}"
+          docker push "${{ env.IMAGE_PREFIX }}-notification-service:main"
+
+      - name: Cleanup
+        if: always()
+        working-directory: .
+        run: docker compose down || true
