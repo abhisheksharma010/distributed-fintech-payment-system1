@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
   detect-changes:
@@ -146,6 +147,16 @@ jobs:
 
       - name: Run tests and build
         run: ./gradlew clean build --no-daemon
+
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Test Results - ${{ matrix.service }}
+          path: ${{ matrix.service }}/build/test-results/test/**/*.xml
+          reporter: java-junit
+          fail-on-error: false
+          working-directory: .
 
       - name: Upload test reports on failure
         if: failure()
