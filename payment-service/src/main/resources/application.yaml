@@ -1,0 +1,115 @@
+server:
+  port: ${PAYMENT_SERVICE_PORT:8083}
+
+spring:
+  application:
+    name: payment-service
+
+  datasource:
+    url: ${PAYMENT_DB_URL:jdbc:postgresql://localhost:5432/payment_db}
+    username: ${DB_USERNAME:fintech_user}
+    password: ${DB_PASSWORD:fintech_password}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: ${KAFKA_PRODUCER_RETRIES:3}
+
+    consumer:
+      group-id: ${PAYMENT_KAFKA_GROUP_ID:payment-service-group}
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+
+      properties:
+        spring:
+          deserializer:
+            key:
+              delegate:
+                class: org.apache.kafka.common.serialization.StringDeserializer
+
+            value:
+              delegate:
+                class: org.springframework.kafka.support.serializer.JsonDeserializer
+
+          json:
+            trusted:
+              packages: "*"
+            use:
+              type:
+                headers: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+  endpoint:
+    health:
+      show-details: when-authorized
+
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+
+logging:
+  level:
+    root: ERROR
+    com.fintech.payment: INFO
+    org.apache.kafka: ERROR
+    org.springframework.kafka: ERROR
+    org.springframework: ERROR
+
+kafka:
+  topics:
+    payments-created: ${PAYMENTS_CREATED_TOPIC:payments.created}
+    ledger-completed: ${LEDGER_COMPLETED_TOPIC:ledger.completed}
+    ledger-failed: ${LEDGER_FAILED_TOPIC:ledger.failed}
+    payments-completed: ${PAYMENTS_COMPLETED_TOPIC:payments.completed}
+    payments-failed: ${PAYMENTS_FAILED_TOPIC:payments.failed}
+
+outbox:
+  publisher:
+    enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
+    poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:2000}
+    batch-size: ${OUTBOX_BATCH_SIZE:50}
+    send-timeout-ms: ${OUTBOX_KAFKA_SEND_TIMEOUT_MS:10000}
+    topic: ${PAYMENTS_CREATED_TOPIC:payments.created}
+
+payment:
+  recovery:
+    enabled: ${PAYMENT_RECOVERY_ENABLED:true}
+    processing-timeout-ms: ${PAYMENT_PROCESSING_TIMEOUT_MS:300000}
+    retry-interval-ms: ${PAYMENT_RECOVERY_RETRY_INTERVAL_MS:60000}
+    poll-interval-ms: ${PAYMENT_RECOVERY_POLL_INTERVAL_MS:30000}
+    max-attempts: ${PAYMENT_RECOVERY_MAX_ATTEMPTS:3}
+    batch-size: ${PAYMENT_RECOVERY_BATCH_SIZE:20}
+
+ledger:
+  recovery:
+    base-url: ${LEDGER_SERVICE_URL:http://localhost:8084}
+    internal-key: ${LEDGER_RECOVERY_INTERNAL_KEY:local-ledger-recovery-key}
+    connect-timeout-ms: ${LEDGER_RECOVERY_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms: ${LEDGER_RECOVERY_READ_TIMEOUT_MS:3000}

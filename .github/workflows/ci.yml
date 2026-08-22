@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+
+    outputs:
+      services: ${{ steps.detect.outputs.services }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed services
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ALL_SERVICES='[
+            "api-gateway",
+            "identity-service",
+            "payment-service",
+            "ledger-service",
+            "notification-service"
+          ]'
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+
+          HEAD="${{ github.sha }}"
+
+          # Handles first push / unusual push events.
+          if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]]; then
+            echo "No valid base SHA. Running all services."
+            echo "services=$(echo "$ALL_SERVICES" | jq -c .)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Base: $BASE"
+          echo "Head: $HEAD"
+
+          CHANGED_FILES="$(git diff --name-only "$BASE" "$HEAD")"
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Shared CI/infrastructure/build-contract changes should validate all services.
+          if echo "$CHANGED_FILES" | grep -Eq \
+            '^(\.github/workflows/ci\.yml|docker-compose\.yml|docker/|infrastructure/)'; then
+
+            echo "Shared configuration changed. Running all services."
+            echo "services=$(echo "$ALL_SERVICES" | jq -c .)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          SERVICES=()
+
+          if echo "$CHANGED_FILES" | grep -q '^api-gateway/'; then
+            SERVICES+=("api-gateway")
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q '^identity-service/'; then
+            SERVICES+=("identity-service")
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q '^payment-service/'; then
+            SERVICES+=("payment-service")
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q '^ledger-service/'; then
+            SERVICES+=("ledger-service")
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q '^notification-service/'; then
+            SERVICES+=("notification-service")
+          fi
+
+          if [[ ${#SERVICES[@]} -eq 0 ]]; then
+            JSON='[]'
+          else
+            JSON="$(printf '%s\n' "${SERVICES[@]}" | jq -R . | jq -s -c .)"
+          fi
+
+          echo "Services to validate: $JSON"
+          echo "services=$JSON" >> "$GITHUB_OUTPUT"
+
+
+  service-ci:
+    name: CI - ${{ matrix.service }}
+
+    needs:
+      - detect-changes
+
+    if: ${{ needs.detect-changes.outputs.services != '[]' }}
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.detect-changes.outputs.services) }}
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Verify Java
+        run: java -version
+
+      - name: Run tests and build
+        run: ./gradlew clean build --no-daemon
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ matrix.service }}
+          path: |
+            ${{ matrix.service }}/build/reports/tests/test
+            ${{ matrix.service }}/build/test-results/test
+          if-no-files-found: ignore
+          retention-days: 7

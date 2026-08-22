@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+
+  prometheus:
+    image: prom/prometheus
+    container_name: fintech-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana
+    container_name: fintech-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    restart: unless-stopped
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+  zipkin:
+    image: openzipkin/zipkin
+    container_name: fintech-zipkin
+    ports:
+      - "9411:9411"
+    restart: unless-stopped
+
+volumes:
+  grafana-data:

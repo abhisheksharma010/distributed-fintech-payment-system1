@@ -1,0 +1,14 @@
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2s
+
+management:
+  tracing:
+    enabled: false
+
+jwt:
+  secret: test-only-jwt-secret-key-more-than-32-bytes
+  expiration: 3600000

@@ -1,0 +1,9 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/notification_db?options=-c%20TimeZone%3DUTC
+    username: fintech_user
+    password: fintech_password
+
+  kafka:
+    listener:
+      auto-startup: false

@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/payment_db?options=-c%20TimeZone%3DUTC
+    username: fintech_user
+    password: fintech_password
+
+  kafka:
+    listener:
+      auto-startup: false
+
+outbox:
+  publisher:
+    enabled: false
+    poll-interval-ms: 60000
+    batch-size: 10
+    send-timeout-ms: 1000
+    topic: payments.created
+
+payment:
+  recovery:
+    enabled: false
+    processing-timeout-ms: 300000
+    retry-interval-ms: 60000
+    poll-interval-ms: 30000
+    max-attempts: 3
+    batch-size: 20
+
+ledger:
+  recovery:
+    base-url: http://localhost:8084
+    internal-key: test-ledger-recovery-key
+    connect-timeout-ms: 1000
+    read-timeout-ms: 1000

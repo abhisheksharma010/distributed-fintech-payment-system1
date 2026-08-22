@@ -1,0 +1,26 @@
+# Environment files
+.env
+.env.local
+
+# macOS
+.DS_Store
+__MACOSX/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+**/.gradle/
+**/build/
+build/
+
+# Java
+*.class
+*.jar
+*.war
+
+# Logs
+*.log
+logs/

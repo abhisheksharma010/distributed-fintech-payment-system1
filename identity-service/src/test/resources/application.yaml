@@ -1,0 +1,22 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/identity_db
+    username: fintech_user
+    password: fintech_password
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+management:
+  tracing:
+    enabled: false
+
+jwt:
+  secret: test-only-identity-jwt-secret-key-more-than-32-bytes
+  expiration: 3600000

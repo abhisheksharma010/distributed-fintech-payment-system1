@@ -1,0 +1,101 @@
+server:
+  port: ${LEDGER_SERVICE_PORT:8084}
+
+spring:
+  application:
+    name: ledger-service
+
+  datasource:
+    url: ${LEDGER_DB_URL:jdbc:postgresql://localhost:5432/ledger_db}
+    username: ${DB_USERNAME:fintech_user}
+    password: ${DB_PASSWORD:fintech_password}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:2s}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+
+    consumer:
+      group-id: ${LEDGER_KAFKA_GROUP_ID:ledger-service-group}
+      auto-offset-reset: earliest
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+
+      properties:
+        spring:
+          deserializer:
+            key:
+              delegate:
+                class: org.apache.kafka.common.serialization.StringDeserializer
+
+            value:
+              delegate:
+                class: org.springframework.kafka.support.serializer.JsonDeserializer
+
+          json:
+            trusted:
+              packages: "*"
+            use:
+              type:
+                headers: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+  endpoint:
+    health:
+      show-details: when-authorized
+
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+
+kafka:
+  topics:
+    payments-created: ${PAYMENTS_CREATED_TOPIC:payments.created}
+    payments-created-dlt: ${PAYMENTS_CREATED_DLT_TOPIC:payments.created.DLT}
+    ledger-completed: ${LEDGER_COMPLETED_TOPIC:ledger.completed}
+    ledger-failed: ${LEDGER_FAILED_TOPIC:ledger.failed}
+
+ledger:
+  recovery:
+    internal-key: ${LEDGER_RECOVERY_INTERNAL_KEY:local-ledger-recovery-key}
+
+  reconciliation:
+    enabled: ${LEDGER_RECONCILIATION_ENABLED:true}
+    interval-ms: ${LEDGER_RECONCILIATION_INTERVAL_MS:300000}
+
+  cache:
+    ttl: ${LEDGER_CACHE_TTL:60s}
+
+ledger-result:
+  completed-topic: ${LEDGER_COMPLETED_TOPIC:ledger.completed}
+  failed-topic: ${LEDGER_FAILED_TOPIC:ledger.failed}
+  max-attempts: ${LEDGER_RESULT_MAX_ATTEMPTS:3}
+  backoff-ms: ${LEDGER_RESULT_BACKOFF_MS:500}
+  send-timeout-ms: ${LEDGER_RESULT_SEND_TIMEOUT_MS:10000}

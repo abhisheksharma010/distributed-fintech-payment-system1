@@ -1,0 +1,87 @@
+server:
+  port: ${API_GATEWAY_PORT:8081}
+
+spring:
+  application:
+    name: api-gateway
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:2s}
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+
+            - id: identity-service
+              uri: ${IDENTITY_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/auth/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: identityCircuitBreaker
+                    fallbackUri: forward:/fallback/identity
+
+            - id: payment-service
+              uri: ${PAYMENT_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/payments/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    key-resolver: "#{@userKeyResolver}"
+                    redis-rate-limiter.replenishRate: ${PAYMENT_RATE_LIMIT_REPLENISH_RATE:5}
+                    redis-rate-limiter.burstCapacity: ${PAYMENT_RATE_LIMIT_BURST_CAPACITY:5}
+                    redis-rate-limiter.requestedTokens: 1
+
+                - name: CircuitBreaker
+                  args:
+                    name: paymentCircuitBreaker
+                    fallbackUri: forward:/fallback/payment
+
+            - id: ledger-service
+              uri: ${LEDGER_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/ledger/**,/api/accounts/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: ledgerCircuitBreaker
+                    fallbackUri: forward:/fallback/ledger
+
+            - id: notification-service
+              uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8085}
+              predicates:
+                - Path=/api/notifications/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: notificationCircuitBreaker
+                    fallbackUri: forward:/fallback/notification
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+  endpoint:
+    health:
+      show-details: when-authorized
+
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION:3600000}

@@ -1,0 +1,55 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ledger_db?options=-c%20TimeZone%3DUTC
+    username: fintech_user
+    password: fintech_password
+    driver-class-name: org.postgresql.Driver
+
+    hikari:
+      maximum-pool-size: 3
+      minimum-idle: 0
+      connection-timeout: 5000
+      idle-timeout: 10000
+      max-lifetime: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2s
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    listener:
+      auto-startup: false
+
+    consumer:
+      group-id: ledger-service-test-group
+      auto-offset-reset: earliest
+
+ledger:
+  reconciliation:
+    enabled: false
+
+  cache:
+    ttl: 60s
+
+ledger-result:
+  completed-topic: ledger.completed
+  failed-topic: ledger.failed
+  max-attempts: 3
+  backoff-ms: 0
+  send-timeout-ms: 1000
+
+management:
+  tracing:
+    enabled: false
