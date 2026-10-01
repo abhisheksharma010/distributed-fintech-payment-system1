@@ -9,32 +9,26 @@ import org.springframework.security.web.server.SecurityWebFilterChain;
 public class SecurityConfig {
 
     @Bean
-    public SecurityWebFilterChain
-    securityWebFilterChain(
+    public SecurityWebFilterChain securityWebFilterChain(
             ServerHttpSecurity http
     ) {
-
         return http
-                .csrf(
-                        ServerHttpSecurity
-                                .CsrfSpec::disable
-                )
+                .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(
                         exchange ->
                                 exchange
                                         .pathMatchers(
                                                 "/api/auth/register",
-                                                "/api/auth/login"
+                                                "/api/auth/login",
+                                                "/actuator/health",
+                                                "/actuator/health/liveness",
+                                                "/actuator/health/readiness"
                                         )
                                         .permitAll()
-
                                         .pathMatchers(
                                                 "/api/ledger/entries"
                                         )
-                                        .hasRole(
-                                                "ADMIN"
-                                        )
-
+                                        .hasRole("ADMIN")
                                         .anyExchange()
                                         .authenticated()
                 )

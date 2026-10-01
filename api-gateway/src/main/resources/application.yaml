@@ -38,7 +38,6 @@ spring:
                     redis-rate-limiter.replenishRate: ${PAYMENT_RATE_LIMIT_REPLENISH_RATE:5}
                     redis-rate-limiter.burstCapacity: ${PAYMENT_RATE_LIMIT_BURST_CAPACITY:5}
                     redis-rate-limiter.requestedTokens: 1
-
                 - name: CircuitBreaker
                   args:
                     name: paymentCircuitBreaker
@@ -73,6 +72,8 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      probes:
+        enabled: true
 
   tracing:
     sampling:
