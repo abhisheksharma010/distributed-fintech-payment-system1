@@ -41,7 +41,8 @@ public class JwtAuthenticationFilter
                     "/api/auth/login",
                     "/actuator/health",
                     "/actuator/health/liveness",
-                    "/actuator/health/readiness"
+                    "/actuator/health/readiness",
+                                        "/actuator/prometheus"
             );
 
     private final JwtService jwtService;
