@@ -237,7 +237,7 @@ jobs:
           format: table
           severity: CRITICAL
           ignore-unfixed: true
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           exit-code: "1"
 
       - name: Push Container
@@ -357,7 +357,7 @@ jobs:
           format: table
           severity: CRITICAL
           ignore-unfixed: true
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           exit-code: "1"
 
       - name: Push Container
@@ -491,7 +491,7 @@ jobs:
           format: table
           severity: CRITICAL
           ignore-unfixed: true
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           exit-code: "1"
 
       - name: Push Container
@@ -634,7 +634,7 @@ jobs:
           format: table
           severity: CRITICAL
           ignore-unfixed: true
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           exit-code: "1"
 
       - name: Push Container
@@ -770,7 +770,7 @@ jobs:
           format: table
           severity: CRITICAL
           ignore-unfixed: true
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           exit-code: "1"
 
       - name: Push Container
