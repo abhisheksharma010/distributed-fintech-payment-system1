@@ -783,3 +783,111 @@ jobs:
         if: always()
         working-directory: .
         run: docker compose down || true
+
+  # =========================================================
+  # Continuous Deployment — AWS EC2 / K3s
+  # =========================================================
+
+  deploy:
+    name: Deploy to AWS K3s
+    needs:
+      - changes
+      - api-gateway
+      - identity
+      - payment
+      - ledger
+      - notification
+
+    if: >-
+      ${{
+        always() &&
+        !failure() &&
+        !cancelled() &&
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/main' &&
+        (
+          needs.changes.outputs.api_gateway == 'true' ||
+          needs.changes.outputs.identity == 'true' ||
+          needs.changes.outputs.payment == 'true' ||
+          needs.changes.outputs.ledger == 'true' ||
+          needs.changes.outputs.notification == 'true'
+        )
+      }}
+
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify K3s
+        run: |
+          sudo kubectl get nodes
+          sudo kubectl get pods -n fintech
+
+      - name: Deploy changed services
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_SHA::7}"
+          PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER}/distributed-fintech"
+
+          echo "Deploying image tag: ${TAG}"
+
+          if [[ "${{ needs.changes.outputs.api_gateway }}" == "true" ]]; then
+            sudo kubectl set image deployment/api-gateway \
+              "*=${PREFIX}-api-gateway:${TAG}" \
+              -n fintech
+            sudo kubectl rollout status deployment/api-gateway \
+              -n fintech --timeout=10m
+          fi
+
+          if [[ "${{ needs.changes.outputs.identity }}" == "true" ]]; then
+            sudo kubectl set image deployment/identity-service \
+              "*=${PREFIX}-identity-service:${TAG}" \
+              -n fintech
+            sudo kubectl rollout status deployment/identity-service \
+              -n fintech --timeout=10m
+          fi
+
+          if [[ "${{ needs.changes.outputs.payment }}" == "true" ]]; then
+            sudo kubectl set image deployment/payment-service \
+              "*=${PREFIX}-payment-service:${TAG}" \
+              -n fintech
+            sudo kubectl rollout status deployment/payment-service \
+              -n fintech --timeout=10m
+          fi
+
+          if [[ "${{ needs.changes.outputs.ledger }}" == "true" ]]; then
+            sudo kubectl set image deployment/ledger-service \
+              "*=${PREFIX}-ledger-service:${TAG}" \
+              -n fintech
+            sudo kubectl rollout status deployment/ledger-service \
+              -n fintech --timeout=10m
+          fi
+
+          if [[ "${{ needs.changes.outputs.notification }}" == "true" ]]; then
+            sudo kubectl set image deployment/notification-service \
+              "*=${PREFIX}-notification-service:${TAG}" \
+              -n fintech
+            sudo kubectl rollout status deployment/notification-service \
+              -n fintech --timeout=10m
+          fi
+
+      - name: Verify deployment
+        run: |
+          sudo kubectl get deployments -n fintech
+          sudo kubectl get pods -n fintech
+
+      - name: Gateway smoke test
+        run: |
+          curl --fail --silent --show-error \
+            --retry 12 \
+            --retry-delay 5 \
+            http://127.0.0.1:30081/actuator/health/liveness
